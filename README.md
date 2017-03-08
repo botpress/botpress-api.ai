@@ -1,6 +1,8 @@
 # botpress-api.ai
 The easiest way to create an API.AI bot with Botpress
 
+When your bot receives messages, Botpress will make a request to API.AI and return the NLP content in `event.nlp` object. It could be done with *Default Mode*.
+
 ## Getting started
 
 ```
