@@ -10,7 +10,10 @@ import {
   FormGroup,
   FormControl,
   Alert,
-  Button
+  Button,
+  Glyphicon,
+  ListGroup,
+  ListGroupItem
 } from 'react-bootstrap'
 
 import Markdown from 'react-markdown'
@@ -22,8 +25,14 @@ const supportedLanguages = {
   'zh-CN': "Chinese (Simplified)",
   'zh-TW': "Chinese (Traditional)",
   'en': "English",
+  'en-AU': "English (Australian)",
+  'en-CA': "English (Canadian)",
+  'en-GB': "English (Great Britain)",
+  'en-US': "English (United States)",
   'nl': "Dutch",
   'fr': "French",
+  'fr-FR': "French (French)",
+  'fr-CA': "French (Canadian)",
   'de': "German",
   'it': "Italian",
   'ja': "Japanese",
@@ -35,8 +44,20 @@ const supportedLanguages = {
 }
 
 const documentation = {
+  languages: `
+  ### Multi-Language Agent
+  
+  You can specify different agents and the languages they support.  
+  For each agent you need to specify a name (doesn't need to correspond to api.ai agent name), the client access token of the agent, and the languages it support based on [api.ai reference](https://api.ai/docs/reference/language) seperated by commas (eg: fr,en,it).
+
+  This module will try to query the agent that support the locale of the user based on \`event.user.locale\`.  
+  If no agent contains the locale, it will look for the root language (eg: en instead of en-GB) otherwise the fallback language setting is used.
+  
+  For more information, see "[Multi-language Agents](https://api.ai/docs/multi-language)" on api.ai.
+  `
+  ,
   default: `
-  ### Default
+  ### Mode Default
 
   This mode will inject understanding metadata inside incoming messages through the API.AI middleware.
 
@@ -51,7 +72,7 @@ const documentation = {
   \`\`\`
   `
   ,
-  fulfillment: `### Fulfillment
+  fulfillment: `### Mode Fulfillment
 
   This mode will check if there's an available response in the \`fulfillment\` property of the API.AI response and respond automatically. No code required.
 
@@ -72,18 +93,19 @@ export default class ApiModule extends React.Component {
       initialStateHash: null
     }
 
-    this.renderAccessToken = this.renderAccessToken.bind(this)
+    this.renderAgent = this.renderAgent.bind(this)
     this.renderRadioButton = this.renderRadioButton.bind(this)
     this.renderLanguage = this.renderLanguage.bind(this)
 
-    this.handleAccesTokenChange = this.handleAccesTokenChange.bind(this)
+    this.handleAddToAgentList = this.handleAddToAgentList.bind(this)
+    this.handleRemoveFromAgentList = this.handleRemoveFromAgentList.bind(this)
     this.handleSaveChanges = this.handleSaveChanges.bind(this)
     this.handleRadioChange = this.handleRadioChange.bind(this)
     this.handleLanguageChange = this.handleLanguageChange.bind(this)
   }
 
   getStateHash() {
-    return this.state.accessToken + ' ' + this.state.lang + ' ' + this.state.mode
+    return this.state.agents + ' ' + this.state.lang + ' ' + this.state.mode
   }
 
   getAxios() {
@@ -105,10 +127,52 @@ export default class ApiModule extends React.Component {
       })
     })
   }
+  
+  handleAddToAgentList() {
+    const name = ReactDOM.findDOMNode(this.newAgentName)
+    const clientToken = ReactDOM.findDOMNode(this.newAgentClientToken)
+    const langs = ReactDOM.findDOMNode(this.newAgentLangs)
+    const item = {
+      name: name && name.value,
+      clientToken: clientToken && clientToken.value,
+      langs: langs && langs.value.replace(/\s/g,'').split(',')
+    }
 
-  handleAccesTokenChange(event) {
+    let errors = []
+    if (_.some(_.values(item), _.isEmpty)) {
+      errors.push("Fields can not be empty")
+    }
+    if (_.some(item.langs, v => !(v in supportedLanguages))) {
+      errors.push("A locale is not a supported language")
+    }
+    if (_.some(_.map(this.state.agents, 'langs'), a => _.some(a, v => item.langs.includes(v)))) {
+      errors.push("A language can only be part of one agent")
+    }
+    if (_.map(this.state.agents, 'clientToken').includes(item.clientToken)) {
+      errors.push("A client token must be unique")
+    }
+    if (errors.length > 0) {
+      this.setState({
+        message: {
+          type: 'danger',
+          text: errors.join("; ")
+        }
+      })
+      return
+    }
+    
     this.setState({
-      accessToken: event.target.value
+      agents: _.concat(this.state.agents, item)
+    })
+
+    name.value = ''
+    clientToken.value = ''
+    lang.value = ''
+  }
+
+  handleRemoveFromAgentList(value) {
+    this.setState({
+      agents: _.without(this.state.agents, value)
     })
   }
 
@@ -119,16 +183,25 @@ export default class ApiModule extends React.Component {
   }
 
   handleLanguageChange(event) {
-    this.setState({
-      lang: event.target.value
-    })
+    if (_.some(_.map(this.state.agents, 'langs'), a => a.includes(event.target.value))) {
+      this.setState({
+        lang: event.target.value
+      })
+    } else {
+      this.setState({
+        message: {
+          type: 'danger',
+          text: "The fallback language " + event.target.key + " is not present in any agents"
+        }
+      })
+    }
   }
 
   handleSaveChanges() {
     this.setState({ loading:true })
 
     return this.getAxios().post('/api/botpress-apiai/config', {
-      accessToken: this.state.accessToken,
+      agents: this.state.agents,
       lang: this.state.lang,
       mode: this.state.mode
     })
@@ -149,16 +222,47 @@ export default class ApiModule extends React.Component {
       })
     })
   }
-
-  renderAccessToken() {
+  
+  renderAgent(item) {
+    const handleRemove = () => this.handleRemoveFromAgentList(item)
+    return <ListGroupItem key={item.name}>
+        {item.name + ' | ' + item.clientToken + ' | ' + item.langs.join(', ')}
+        <Glyphicon
+          className="pull-right"
+          glyph="remove"
+          onClick={handleRemove} />
+      </ListGroupItem>
+  }
+  
+  renderAgentList() {
     return (
       <Row>
         <FormGroup>
           <Col componentClass={ControlLabel} sm={3}>
-            Access Token
+            Agents
           </Col>
           <Col sm={8}>
-            <FormControl type="text" value={this.state.accessToken} onChange={this.handleAccesTokenChange}/>
+            <div>
+              <FormGroup>
+                <Col>
+                  <ControlLabel>Current agents:</ControlLabel>
+                  <ListGroup>
+                    {this.state.agents.map(this.renderAgent)}
+                  </ListGroup>
+                </Col>
+              </FormGroup>
+              <FormGroup>
+                <Col>
+                  <ControlLabel>Add a new agent:</ControlLabel>
+                  <FormControl ref={r => this.newAgentName = r} type="text" placeholder="name"/>
+                  <FormControl ref={r => this.newAgentClientToken = r} type="text" placeholder="client access token"/>
+                  <FormControl ref={r => this.newAgentLangs = r} type="text" placeholder="en,fr"/>
+                  <Button className='bp-button' onClick={() => this.handleAddToAgentList()}>
+                    Add
+                  </Button>
+                </Col>
+              </FormGroup>
+            </div>
           </Col>
         </FormGroup>
       </Row>
@@ -200,13 +304,18 @@ export default class ApiModule extends React.Component {
   }
 
   renderLanguage() {
-    const supportedLanguageOptions = _.mapValues(supportedLanguages, this.renderLanguageOption)
+    const langs = _.flatten(_.map(this.state.agents, 'langs'))
+    let availableLanguages = {}
+    for (const lang of langs) {
+      availableLanguages[lang] = supportedLanguages[lang]
+    }
+    const supportedLanguageOptions = _.mapValues(availableLanguages, this.renderLanguageOption)
 
     return (
       <Row>
         <FormGroup>
           <Col componentClass={ControlLabel} sm={3}>
-            Language
+            Fallback Language
           </Col>
           <Col sm={8}>
             <FormControl value={this.state.lang} componentClass="select" onChange={this.handleLanguageChange}>
@@ -222,6 +331,7 @@ export default class ApiModule extends React.Component {
     return (
       <Row className={style.explication}>
         <Col sm={12}>
+          <Markdown source={documentation.languages} />
           <Markdown source={documentation[this.state.mode]} />
         </Col>
       </Row>
@@ -239,7 +349,7 @@ export default class ApiModule extends React.Component {
       ? {opacity:1}
       : {opacity:0}
 
-    return <Button style={opacityStyle} bsStyle="success" onClick={this.handleSaveChanges}>Save</Button>
+    return <Button className={style.saveButton} style={opacityStyle} bsStyle="success" onClick={this.handleSaveChanges}>Save</Button>
   }
 
   render() {
@@ -255,7 +365,7 @@ export default class ApiModule extends React.Component {
             <Panel className={style.panel} header="Settings">
               {this.renderSaveButton()}
               <div className={style.settings}>
-                {this.renderAccessToken()}
+                {this.renderAgentList()}
                 {this.renderLanguage()}
                 {this.renderMode()}
               </div>
