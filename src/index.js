@@ -54,7 +54,8 @@ const sendOutgoing = (event) => ({data}) => {
       raw: {
         to: event.user.id,
         message: result.fulfillment.speech
-      }
+      },
+      user: event.user,
     })
   }
 }
