@@ -27,6 +27,39 @@ const setService = () => {
   }
 }
 
+const errorHandler = (bp) => error => {
+  let err = _.get(error, 'response.data.status')
+         || _.get(error, 'message')
+         || error
+         || 'Unknown error'
+
+  if (err && err.code) {
+    err = '[' + err.code + '] Type:' + err.errorType + ':', err.errorDetails
+  }
+
+  console.log(error.stack)
+
+  bp.logger.warn('botpress-api.ai', 'API Error. Could not trigger event: ' + err);
+}
+
+const sendOutgoing = (event) => ({data}) => {
+  const {result} = data
+  if (result.fulfillment
+      && result.fulfillment.speech
+      && result.fulfillment.speech.length > 0) {
+    event.bp.middlewares.sendOutgoing({
+      type: 'text',
+      platform: event.platform,
+      text: result.fulfillment.speech,
+      raw: {
+        to: event.user.id,
+        message: result.fulfillment.speech
+      },
+      user: event.user,
+    })
+  }
+}
+
 const contextAdd = userId => (name, lifespan = 1) => {
   return getClient().post('/contexts?v=20170101', [
     { name, lifespan }
@@ -35,6 +68,19 @@ const contextAdd = userId => (name, lifespan = 1) => {
 
 const contextRemove = userId => name => {
   return getClient().delete('/contexts/' + name, { params: { sessionId: userId } })
+}
+
+const triggerEvent = (userId, originalEvent) => (name, data = {}) => {
+  return getClient().post('/query?v=20170101', {
+    event: {
+      name,
+      data,
+    },
+    lang: config.lang,
+    sessionId: userId,
+  })
+    .then(sendOutgoing(originalEvent))
+    .catch(errorHandler(originalEvent.bp))
 }
 
 const incomingMiddleware = (event, next) => {
@@ -46,55 +92,32 @@ const incomingMiddleware = (event, next) => {
   }
 
     service(shortUserId, event.text)
-    .then(({data}) => {
-      const {result} = data
-      if (config.mode === 'fulfillment' 
-        && result.fulfillment 
-        && result.fulfillment.speech
-        && result.fulfillment.speech.length > 0) {
-        event.bp.middlewares.sendOutgoing({
-          type: 'text',
-          platform: event.platform,
-          text: result.fulfillment.speech,
-          raw: {
-            to: event.user.id,
-            message: result.fulfillment.speech
-          }
-        })
+    .then((response) => {
+      if (config.mode === 'fulfillment') {
+        sendOutgoing(event)(response)
         return null // swallow the event, don't call next()
       } else {
+        const { data: { result }} = response
         event.nlp = Object.assign(result, {
           context: {
             add: contextAdd(shortUserId),
             remove: contextRemove(shortUserId)
-          }
+          },
+          triggerEvent: triggerEvent(shortUserId, event),
         })
         next()
       }
     })
-    .catch(error => {
-      let err = _.get(error, 'response.data.status')
-        || _.get(error, 'message')
-        || error
-        || 'Unknown error'
-
-      if (err && err.code) {
-        err = '[' + err.code + '] Type:' + err.errorType + ':', err.errorDetails
-      }
-
-      console.log(error.stack)
-
-      event.bp.logger.warn('botpress-api.ai', 'API Error. Could not process incoming text: ' + err);
-      next()
-    })
+    .catch(errorHandler(event.bp))
   } else {
     event.nlp = {
       context: {
         add: contextAdd(shortUserId),
         remove: contextRemove(shortUserId)
-      }
+      },
+      triggerEvent: triggerEvent(shortUserId, event),
     }
-    
+
     next()
   }
 }
@@ -109,7 +132,7 @@ module.exports = {
 
   init: async function(bp, configurator) {
     checkVersion(bp, __dirname)
-    
+
     bp.middlewares.register({
       name: 'apiai.incoming',
       module: 'botpress-api.ai',
@@ -118,7 +141,7 @@ module.exports = {
       order: 10,
       description: 'Process natural language in the form of text. Structured data with an action and parameters for that action is injected in the incoming message event.'
     })
-    
+
     config = await configurator.loadAll()
     setService()
   },
