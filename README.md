@@ -47,7 +47,7 @@ Pull requests are welcomed! We believe that it takes all of us to create somethi
 
 There's a [Slack community](https://slack.botpress.io) where you are welcome to join us, ask any question and even help others.
 
-Get an invite and join us now! ?[https://slack.botpress.io](https://slack.botpress.io)
+Get an invite and join us now! 👉[https://slack.botpress.io](https://slack.botpress.io)
 
 ## ENV Variables
 
