@@ -10,10 +10,19 @@ botpress install api.ai
 The API.AI module should now be available in your bot UI
 
 ## Features
+### Multi-Language Agent
 
+You can specify different agents and the languages they supports.  
+
+This module will try to query the agent that support the locale of the user.   
+If no agent contains the locale, it will look for the root language (eg: en instead of en-GB) otherwise the default language parameter is used.
+
+For more information see https://api.ai/docs/multi-language
+
+### Mode
 This module has two modes: **Default** (amend incoming events) and **Fulfillment** (respond automatically).
 
-### Default Mode
+#### Default Mode
 
 This mode will inject understanding metadata inside incoming messages through the API.AI middleware.
 
@@ -33,7 +42,7 @@ bp.hear({'nlp.source': 'agent'}, (event, next) => {
 })
 ```
 
-### Fulfillment Mode
+#### Fulfillment Mode
 
 This mode will check if there's an available response in the `fulfillment` property of the API.AI response and respond automatically. No code required.
 
@@ -54,7 +63,7 @@ Get an invite and join us now! 👉[https://slack.botpress.io](https://slack.bot
 | ENV | Default | Description |
 |---|---|---|
 | BOTPRESS_HTTP_TIMEOUT | 5000 | The timeout to API.AI requests |
-| APIAI_TOKEN | null | Override the API token |
+| APIAI_TOKEN | null | Override the API token (depreciated after v2.1.3)|
 
 ## License
 

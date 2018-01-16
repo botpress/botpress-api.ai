@@ -9,35 +9,69 @@ import axios from 'axios'
 let config = null
 let service = null
 
-const getClient = () => {
+const getAgent = (lang) => {
+  if (config.agents.length == 0) {
+    // back compatibility
+    return {clientToken: config.accessToken}
+  }
+  
+  for (const agent of config.agents) {
+    if (agent.langs.includes(lang)) {
+      return agent
+    }
+  }
+}
+
+const getAvailableLang = (lang) => {
+  if (!lang) {
+    return config.lang
+  }
+  lang = lang.replace('_', '-') // convert bp locale format to api.ai format
+  
+  for (const agent of config.agents) {
+    if (agent.langs.includes(lang)) {
+      return lang
+    }
+  }
+  
+  const l = lang.split('-')
+  if (l.length == 2) {
+    return getAvailableLang(l[0])
+  }
+  
+  return config.lang
+}
+
+const getClient = (lang) => {
   return axios.create({
     baseURL: 'https://api.api.ai/v1',
     timeout: process.env.BOTPRESS_HTTP_TIMEOUT || 5000,
-    headers: {'Authorization': 'Bearer ' + config.accessToken}
+    headers: {'Authorization': 'Bearer ' + getAgent(lang).clientToken}
   })
 }
 
 const setService = () => {
-  service = (userId, text) => {
-    return getClient().post('/query?v=20170101', {
+  service = (userId, lang, text) => {
+    return getClient(lang).post('/query?v=20170101', {
       query: text,
-      lang: config.lang,
+      lang: lang,
       sessionId: userId
     })
   }
 }
 
-const contextAdd = userId => (name, lifespan = 1) => {
-  return getClient().post('/contexts?v=20170101', [
+const contextAdd = (userId, lang) => (name, lifespan = 1) => {
+  return getClient(lang).post('/contexts?v=20170101', [
     { name, lifespan }
   ], { params: {sessionId: userId } })
 }
 
-const contextRemove = userId => name => {
-  return getClient().delete('/contexts/' + name, { params: { sessionId: userId } })
+const contextRemove = (userId, lang) => name => {
+  return getClient(lang).delete('/contexts/' + name, { params: { sessionId: userId } })
 }
 
 const incomingMiddleware = (event, next) => {
+  const lang = getAvailableLang(event.user.locale)
   let shortUserId = _.get(event, 'user.id') || ''
   if (shortUserId.length > 36) {
     shortUserId = crypto.createHash('md5').update(shortUserId).digest("hex")
@@ -45,7 +79,7 @@ const incomingMiddleware = (event, next) => {
 
   if (["message", "postback", "text", "quick_reply"].includes(event.type)) {
     
-    service(shortUserId, event.payload || event.text)
+    service(shortUserId, lang, event.payload || event.text)
     .then(({data}) => {
       const {result} = data
       if (config.mode === 'fulfillment'
@@ -67,8 +101,8 @@ const incomingMiddleware = (event, next) => {
       } else {
         event.nlp = Object.assign(result, {
           context: {
-            add: contextAdd(shortUserId),
-            remove: contextRemove(shortUserId)
+            add: contextAdd(shortUserId, lang),
+            remove: contextRemove(shortUserId, lang)
           }
         })
         next()
@@ -86,14 +120,14 @@ const incomingMiddleware = (event, next) => {
 
       console.log(error.stack)
 
-      event.bp.logger.warn('botpress-api.ai', 'API Error. Could not process incoming text: ' + err);
+      event.bp.logger.warn('botpress-api.ai', 'API Error. Could not process incoming text: ' + err)
       next()
     })
   } else {
     event.nlp = {
       context: {
-        add: contextAdd(shortUserId),
-        remove: contextRemove(shortUserId)
+        add: contextAdd(shortUserId, lang),
+        remove: contextRemove(shortUserId, lang)
       }
     }
     
@@ -104,7 +138,8 @@ const incomingMiddleware = (event, next) => {
 module.exports = {
 
   config: {
-    accessToken: { type: 'string', env: 'APIAI_TOKEN' },
+    accessToken: { type: 'string', env: 'APIAI_TOKEN' }, // back compatibility
+    agents: { type: 'any', required: true, default: [], validation: v => _.isArray(v) },
     lang: { type: 'string', default: 'en' },
     mode: { type: 'choice', validation: ['fulfillment', 'default'], default: 'default' }
   },
@@ -133,8 +168,8 @@ module.exports = {
     })
 
     router.post('/config', async (req, res) => {
-      const { accessToken, lang, mode } = req.body
-      await configurator.saveAll({ accessToken, lang, mode })
+      const { agents, lang, mode } = req.body
+      await configurator.saveAll({ agents, lang, mode })
       config = await configurator.loadAll()
       setService()
       res.sendStatus(200)
