@@ -71,19 +71,19 @@ const contextRemove = (userId, lang) => name => {
 }
 
 const incomingMiddleware = (event, next) => {
-  if (event.type === 'message') {
+  const lang = getAvailableLang(event.user.locale)
+  let shortUserId = _.get(event, 'user.id') || ''
+  if (shortUserId.length > 36) {
+    shortUserId = crypto.createHash('md5').update(shortUserId).digest("hex")
+  }
 
-    const lang = getAvailableLang(event.user.locale)
-    let shortUserId = event.user.id
-    if (shortUserId.length > 36) {
-      shortUserId = crypto.createHash('md5').update(shortUserId).digest("hex")
-    }
-
-    service(shortUserId, lang, event.text)
+  if (["message", "postback", "text", "quick_reply"].includes(event.type)) {
+    
+    service(shortUserId, lang, event.payload || event.text)
     .then(({data}) => {
       const {result} = data
-      if (config.mode === 'fulfillment' 
-        && result.fulfillment 
+      if (config.mode === 'fulfillment'
+        && result.fulfillment
         && result.fulfillment.speech
         && result.fulfillment.speech.length > 0) {
         event.bp.middlewares.sendOutgoing({
@@ -92,7 +92,9 @@ const incomingMiddleware = (event, next) => {
           text: result.fulfillment.speech,
           raw: {
             to: event.user.id,
-            message: result.fulfillment.speech
+            message: result.fulfillment.speech,
+            channelId: event.platform !== 'slack' ? null : event.channel.id,
+            options: event.platform !== 'slack' ? null : {}
           }
         })
         return null // swallow the event, don't call next()
